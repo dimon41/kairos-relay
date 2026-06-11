@@ -4,7 +4,9 @@
   "description": "MJPEG relay server for Kairos Surveillance",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
   },
   "engines": {
     "node": ">=18"
