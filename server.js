@@ -171,6 +171,13 @@ async function sendMotionAlert(roomId, deviceName, watchUrl) {
 const server = http.createServer((req, res) => {
   const { pathname } = parseUrl(req.url, true);
 
+  // ── GET / and /healthz — health check (Fly probes the root URL) ──────────
+  if ((pathname === '/' || pathname === '/healthz') && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Kairos relay OK');
+    return;
+  }
+
   // ── GET /watch/<roomId> — viewer HTML page ──────────────────────────────
   const watchM = pathname.match(/^\/watch\/([A-Za-z0-9_-]+)$/);
   if (watchM && req.method === 'GET') {
