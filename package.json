@@ -5,8 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev"
+    "deploy": "fly deploy"
   },
   "engines": {
     "node": ">=18"

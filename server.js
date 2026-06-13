@@ -13,12 +13,16 @@
  *   RESEND_API_KEY    — Resend API key for motion alert emails
  *   FROM_EMAIL        — sender address (default 'onboarding@resend.dev')
  *   ALERT_COOLDOWN_MS — minimum ms between alerts per room (default 300000 = 5 min)
+ *   DATA_DIR          — directory for persisted email subscribers (default '/data',
+ *                       a Fly Volume; falls back gracefully if unwritable)
  */
 
 'use strict';
 
 const http  = require('http');
 const https = require('https');
+const fs    = require('fs');
+const path  = require('path');
 const { WebSocketServer } = require('ws');
 const { parse: parseUrl } = require('url');
 
@@ -27,6 +31,8 @@ const SECRET           = process.env.PUBLISH_SECRET            ?? 'kairos';
 const RESEND_API_KEY   = process.env.RESEND_API_KEY            ?? '';
 const FROM_EMAIL       = process.env.FROM_EMAIL                ?? 'onboarding@resend.dev';
 const ALERT_COOLDOWN   = parseInt(process.env.ALERT_COOLDOWN_MS ?? '300000', 10);
+const DATA_DIR         = process.env.DATA_DIR                  ?? '/data';
+const SUBSCRIBERS_FILE = path.join(DATA_DIR, 'subscribers.json');
 
 // roomId → { lastFrame, viewers, subscribers, lastAlertAt }
 const rooms = new Map();
@@ -41,6 +47,55 @@ function getRoom(id) {
     });
   }
   return rooms.get(id);
+}
+
+// ── Subscriber persistence ──────────────────────────────────────────────────────
+// Email subscribers are persisted to a JSON file so they survive redeploys and
+// machine restarts. On Fly this lives on a Volume mounted at DATA_DIR (/data).
+// Only the subscriber lists are persisted — frames/viewers are ephemeral.
+
+function loadSubscribers() {
+  let raw;
+  try {
+    raw = fs.readFileSync(SUBSCRIBERS_FILE, 'utf8');
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error('Subscriber load failed:', e.message);
+    return; // first boot — nothing to load
+  }
+  try {
+    const obj = JSON.parse(raw);
+    let count = 0;
+    for (const [roomId, emails] of Object.entries(obj)) {
+      if (Array.isArray(emails) && emails.length) {
+        getRoom(roomId).subscribers = new Set(emails);
+        count += emails.length;
+      }
+    }
+    console.log(`Loaded ${count} subscriber(s) across ${Object.keys(obj).length} room(s)`);
+  } catch (e) {
+    console.error('Subscriber file corrupt, ignoring:', e.message);
+  }
+}
+
+// Debounced atomic write — coalesces bursts and never leaves a half-written file.
+let _saveTimer = null;
+function saveSubscribers() {
+  if (_saveTimer) return;
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null;
+    const obj = {};
+    for (const [roomId, room] of rooms) {
+      if (room.subscribers.size) obj[roomId] = [...room.subscribers];
+    }
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      const tmp = SUBSCRIBERS_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(obj), 'utf8');
+      fs.renameSync(tmp, SUBSCRIBERS_FILE);
+    } catch (e) {
+      console.error('Subscriber persist failed:', e.message);
+    }
+  }, 1000);
 }
 
 // ── Email ─────────────────────────────────────────────────────────────────────
@@ -162,6 +217,7 @@ const server = http.createServer((req, res) => {
           room.subscribers.add(addr);
           console.log(`[${new Date().toISOString()}] Subscribed   room=${subM[1]} email=${addr}`);
         }
+        saveSubscribers();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch {
@@ -363,8 +419,11 @@ function viewerHtml(roomId, host) {
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
+loadSubscribers();
+
 server.listen(PORT, () => {
   console.log(`Kairos relay listening on port ${PORT}  secret=${SECRET}`);
+  console.log(`Subscriber store: ${SUBSCRIBERS_FILE}`);
   if (RESEND_API_KEY) {
     console.log(`Email alerts enabled  from=${FROM_EMAIL}  cooldown=${ALERT_COOLDOWN / 1000}s`);
   } else {

@@ -1,20 +1,22 @@
-# fly.toml app configuration file generated for kairos-relay on 2026-06-13T16:11:46Z
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
 app = 'kairos-relay'
-primary_region = 'ams'
+primary_region = 'ams'  # Amsterdam — where Fly Launch created the machine
 
 [build]
 
 [http_service]
-  internal_port = 8080
+  internal_port = 3000   # app listens on PORT ?? 3000 (Dockerfile EXPOSE 3000)
   force_https = true
-  auto_stop_machines = 'off'
+  auto_stop_machines = 'off'   # keep alive — relay must never sleep
   auto_start_machines = true
   min_machines_running = 1
 
 [[vm]]
   size = 'shared-cpu-1x'
   memory = '256mb'
+
+# Persistent disk for the email-subscriber store (relay-server reads/writes
+# $DATA_DIR/subscribers.json). The volume must be in the machine's region (ams):
+#   fly volumes create kairos_data --size 1 --region ams
+[mounts]
+  source = 'kairos_data'
+  destination = '/data'
